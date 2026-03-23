@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment
+.env
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+
+# Testes
+test_results/
+test_banco_agil.db
+
+# OS
+.DS_Store
+Thumbs.db

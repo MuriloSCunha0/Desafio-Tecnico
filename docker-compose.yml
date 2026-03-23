@@ -1,0 +1,36 @@
+# ============================================================
+# docker-compose.yml — Banco Ágil Multi-Agent Banking System
+# ============================================================
+
+services:
+  banco-agil:
+    build: .
+    container_name: banco-agil
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persistir dados CSV entre reinícios
+      - ./data:/app/data
+      # Persistir banco SQLite do checkpointer
+      - sqlite_data:/app/db
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_MODEL=${GOOGLE_MODEL:-gemini-2.0-flash}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - banco-agil-net
+
+networks:
+  banco-agil-net:
+    driver: bridge
+
+volumes:
+  sqlite_data:
+    driver: local
