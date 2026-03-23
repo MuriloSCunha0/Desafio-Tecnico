@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python test_flows.py)",
-      "Bash(python -c \":*)"
-    ]
-  }
-}
