@@ -262,7 +262,13 @@ python test_flows.py
 
 ```
 ├── app.py                    # Frontend Streamlit (UI de chat)
-├── agents.py                 # 4 agentes + prompts + LLM factory + parsers
+├── agents/                   # Pacote de Agentes de IA
+│   ├── __init__.py           # Exportação do pacote
+│   ├── core.py               # Utilitários, LLM factory, parsing compartilhado
+│   ├── triage.py             # Agente de Triagem (4 fases de autenticação)
+│   ├── credit.py             # Agente de Crédito (consulta/aumento de limite)
+│   ├── interview.py          # Agente de Entrevista (reavaliação de score)
+│   └── forex.py              # Agente de Câmbio (cotação de moedas)
 ├── state.py                  # StateGraph, AgentState, roteamento, tool executor
 ├── tools.py                  # 6 tools (@tool LangChain)
 ├── db_utils.py               # CRUD para arquivos CSV
