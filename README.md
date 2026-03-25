@@ -191,7 +191,9 @@ O LangGraph foi escolhido porque oferece exatamente o que um sistema multi-agent
 
 ---
 
-## Tutorial de Execução
+## 🕹️ Tutorial de Execução Rápida
+
+O sistema agora é dividido em Microsserviços. Para rodá-lo, você precisará de dois terminais (um para o Motor de IA e outro para a Interface Visual).
 
 ### Pré-requisitos
 
@@ -200,54 +202,50 @@ O LangGraph foi escolhido porque oferece exatamente o que um sistema multi-agent
   - **Ollama** com modelo `llama3.1:8b` (dev local)
   - Chave de API do **Groq** (free tier funciona) — recomendado
   - Chave de API do **Google Gemini**
-- **Docker** e **Docker Compose** (opcional)
 
-### Opção 1: Execução Local
+### Execução Local (Siga a Ordem Exata)
 
 ```bash
 # 1. Clonar o repositório
 git clone <url-do-repositório>
 cd desafio-tecnico
 
-# 2. Instalar dependências
-pip install -r requirements.txt
+# 2. Instalar o gerenciador moderno 'uv' (se não tiver)
+pip install uv
 
-# 3. Configurar ambiente
-cp .env.example .env
-# Edite .env com sua API key e provider
+# 3. Criar ambiente virtual e instalar dependências em alta velocidade
+uv venv
+# Ative no Windows:
+# .\.venv\Scripts\activate
+# Ative no Mac/Linux:
+# source .venv/bin/activate
+uv pip install -r requirements.txt
 
-# 4. (Se usar Ollama) Baixar o modelo
-ollama pull llama3.1:8b
-
-# 5. Executar
-streamlit run app.py
-
-# 6. Acessar: http://localhost:8501
+# 4. Configurar ambiente
+cp backend/.env.example backend/.env
+# Edite backend/.env com sua API key e provider
 ```
 
-### Opção 2: Docker
-
+**Terminal 1: Ligando a Mente (Backend / LangGraph / API)**
 ```bash
-# 1. Configurar ambiente
-cp .env.example .env
-# Edite .env com sua API key
+cd backend
+uvicorn main:app --port 8001 --reload
+```
+A API ficará de prontidão no endereço `http://localhost:8001/api/chat`.
 
-# 2. Construir e subir
-docker compose up --build
-
-# 3. Acessar: http://localhost:8501
+**Terminal 2: Ligando o Design (Frontend / Django)**
+```bash
+cd frontend
+python manage.py runserver 8000
 ```
 
-### Testando o Sistema
-
-**Testes manuais no chat:**
-
-1. **Autenticação**: CPF `12345678901`, data `15/05/1990` (Ana Clara Silva)
-2. **Consulta de crédito**: "Quero ver meu limite"
-3. **Aumento de limite**: Peça R$ 15.000 para ver rejeição (score baixo)
-4. **Entrevista**: Aceite a entrevista, responda as 5 perguntas
-5. **Câmbio**: "Quanto está o dólar?"
-6. **Bloqueio**: Erre 3 vezes os dados para ver o bloqueio
+### 👥 Massa de Teste Sugerida (Faça o teste prático!)
+Acesse no navegador: `http://localhost:8000`.
+No canto superior direito, clique em **Terminal de Debug**. Uma janela lateral deslizará.
+A partir daí, inicie um teste normal:
+1. Comece digitando o CPF da Ana Clara: `12345678901`.
+2. A IA pedirá um validador. Envie: `15/05/1990`.
+3. Experimente conversar com o banco normalmente e veja os logs de `LANGGRAPH` pulando ao vivo no painel de desenvolvedor.
 
 **Testes automatizados (12 cenários):**
 

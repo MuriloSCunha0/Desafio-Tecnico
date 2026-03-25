@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Banco Ágil - IA Assistant</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0fdfa',
+                            500: '#14b8a6',
+                            600: '#0d9488',
+                            900: '#134e4a',
+                        },
+                        dark: {
+                            900: '#0f172a',
+                            800: '#1e293b',
+                            700: '#334155',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0f172a;
+            background-image: radial-gradient(circle at top right, #1e293b, transparent 40%),
+                              radial-gradient(circle at bottom left, #134e4a, transparent 40%);
+            background-attachment: fixed;
+        }
+        
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .typing-indicator span {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background-color: #94a3b8;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        .msg-enter {
+            animation: slideUp 0.3s ease-out forwards;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="h-screen w-full flex items-center justify-center p-4 text-slate-200 antialiased overflow-hidden">
+
+    <!-- Main Container -->
+    <div class="glass-panel w-full max-w-6xl h-[90vh] rounded-3xl flex overflow-hidden relative transition-all duration-300">
+        
+        <!-- Left Chat Area -->
+        <div class="flex-1 flex flex-col h-full border-r border-slate-700/50">
+            <!-- Header -->
+            <header class="h-20 border-b border-slate-700/50 flex items-center justify-between px-8 bg-slate-800/40 shrink-0">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-full bg-gradient-to-tr from-brand-600 to-brand-500 p-[2px]">
+                        <div class="w-full h-full bg-slate-900 rounded-full flex items-center justify-center">
+                            <span class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-400 to-emerald-400">BÁ</span>
+                        </div>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-semibold text-white tracking-wide">Banco Ágil<span class="text-brand-500">.</span></h1>
+                        <p class="text-sm text-slate-400 flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span id="agent-status-text">Assistente Inteligente</span>
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleDebug()" class="px-4 py-2 text-sm font-medium text-amber-400 hover:text-amber-300 bg-amber-400/10 border border-amber-400/20 rounded-full transition-all flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9" /></svg>
+                        Terminal de Debug
+                    </button>
+                    <button onclick="resetChat()" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white bg-slate-700/50 hover:bg-slate-700 rounded-full transition-all">
+                        Reiniciar
+                    </button>
+                </div>
+            </header>
+
+            <!-- Chat Area -->
+            <main id="chat-container" class="flex-1 overflow-y-auto p-8 space-y-6 scrollbar-hide scroll-smooth flex flex-col">
+                <div class="flex gap-4 msg-enter max-w-[80%]">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-600 to-brand-500 shrink-0 mt-1 flex items-center justify-center text-xs font-bold shadow-lg shadow-brand-500/20">BÁ</div>
+                    <div class="bg-slate-700/40 border border-slate-600/30 rounded-2xl rounded-tl-none px-5 py-3.5 text-[15px] leading-relaxed shadow-sm">
+                        Olá! Sou o assistente virtual do Banco Ágil. Para garantir a segurança dos seus dados, por favor, insira o seu **CPF**.
+                    </div>
+                </div>
+            </main>
+
+            <!-- Input Area -->
+            <footer class="p-6 bg-slate-800/20 border-t border-slate-700/50 shrink-0">
+                <form id="chat-form" class="relative max-w-3xl mx-auto flex items-end gap-3">
+                    <div class="relative flex-1 bg-slate-900/50 border border-slate-700 rounded-2xl focus-within:border-brand-500/50 focus-within:ring-1 focus-within:ring-brand-500/50 transition-all shadow-inner">
+                        <textarea id="message-input" rows="1" class="w-full bg-transparent text-slate-200 placeholder-slate-500 px-5 py-4 outline-none resize-none scrollbar-hide" placeholder="Digite sua mensagem para o Agilito..." onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.getElementById('chat-form').dispatchEvent(new Event('submit')); }"></textarea>
+                    </div>
+                    <button type="submit" id="send-btn" class="h-14 w-14 rounded-2xl bg-brand-600 hover:bg-brand-500 text-white flex items-center justify-center shadow-lg shadow-brand-500/30 transition-all hover:scale-105 active:scale-95 shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 ml-1"><path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" /></svg>
+                    </button>
+                </form>
+            </footer>
+        </div>
+
+        <!-- Right Debug Panel -->
+        <aside id="debug-panel" class="w-[350px] bg-slate-900/90 h-full flex flex-col shrink-0 transition-all duration-300 translate-x-full absolute right-0 top-0 border-l border-slate-700/50 z-10 backdrop-blur-xl">
+            <div class="h-20 px-6 flex items-center justify-between border-b border-slate-700/50 shrink-0">
+                <h3 class="font-mono text-sm tracking-widest text-amber-500/90 font-bold uppercase flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                    System Logs
+                </h3>
+                <button onclick="toggleDebug()" class="text-slate-500 hover:text-white p-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div id="debug-logs" class="p-6 flex-1 overflow-y-auto scrollbar-hide font-mono text-xs space-y-3 leading-relaxed">
+                <div class="text-slate-500">[SYSTEM] Painel Operacional Iniciado. Rastreando engine do LangGraph...</div>
+            </div>
+        </aside>
+
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        const API_URL = 'http://localhost:8002/api/chat';
+        let currentThreadId = null;
+        let authCpf = null;
+        let lastReportedAgent = 'triage';
+
+        const chatContainer = document.getElementById('chat-container');
+        const chatForm = document.getElementById('chat-form');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const debugLogs = document.getElementById('debug-logs');
+        const debugPanel = document.getElementById('debug-panel');
+
+        function toggleDebug() {
+            if (debugPanel.classList.contains('translate-x-full')) {
+                debugPanel.classList.remove('translate-x-full');
+            } else {
+                debugPanel.classList.add('translate-x-full');
+            }
+        }
+
+        const addDebugLog = (source, message, isHighlight=false) => {
+            const time = new Date().toLocaleTimeString('pt-BR', { hour12: false });
+            const colorClass = isHighlight ? 'text-amber-400 bg-amber-400/10 p-2 rounded border border-amber-400/20' : 'text-slate-400';
+            const logHtml = `
+                <div class="border-l-2 border-slate-700 pl-3 py-1 ${colorClass}">
+                    <span class="text-slate-600 mr-2 text-[10px]">${time}</span>
+                    <strong class="text-slate-300">[${source}]</strong> ${message}
+                </div>`;
+            debugLogs.insertAdjacentHTML('beforeend', logHtml);
+            debugLogs.scrollTop = debugLogs.scrollHeight;
+        };
+
+        const generateUUID = () => {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        };
+
+        const formatText = (text) => {
+            return text
+                .replace(/\*\*(.*?)\*\*/g, '<span class="text-white font-semibold">$1</span>')
+                .replace(/\*(.*?)\*/g, '<em class="text-slate-300">$1</em>')
+                .replace(/\n/g, '<br>');
+        };
+
+        const addUserMessage = (text) => {
+            const msgHtml = `
+            <div class="flex gap-4 msg-enter max-w-[80%] self-end flex-row-reverse">
+                <div class="w-8 h-8 rounded-full bg-slate-600 shrink-0 mt-1 flex items-center justify-center text-xs font-bold">VOCÊ</div>
+                <div class="bg-brand-600/90 border border-brand-500/50 rounded-2xl rounded-tr-none px-5 py-3.5 text-[15px] leading-relaxed shadow-lg shadow-brand-500/10 text-white">
+                    ${formatText(text)}
+                </div>
+            </div>
+            `;
+            chatContainer.insertAdjacentHTML('beforeend', msgHtml);
+            chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
+        };
+
+        const addBotMessage = (text) => {
+            const msgHtml = `
+            <div class="flex gap-4 msg-enter max-w-[80%]">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-600 to-brand-500 shrink-0 mt-1 flex items-center justify-center text-xs font-bold shadow-lg shadow-brand-500/20">BÁ</div>
+                <div class="bg-slate-700/40 border border-slate-600/30 rounded-2xl rounded-tl-none px-5 py-3.5 text-[15px] leading-relaxed shadow-sm">
+                    ${formatText(text)}
+                </div>
+            </div>
+            `;
+            chatContainer.insertAdjacentHTML('beforeend', msgHtml);
+            chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
+        };
+
+        const showTyping = () => {
+            const typingHtml = `
+            <div id="typing-indicator-box" class="flex gap-4 msg-enter max-w-[80%]">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-600 to-brand-500 shrink-0 mt-1 flex items-center justify-center text-xs font-bold shadow-lg shadow-brand-500/20">BÁ</div>
+                <div class="bg-slate-700/40 border border-slate-600/30 rounded-2xl rounded-tl-none px-5 py-3.5 flex items-center shadow-sm">
+                    <div class="typing-indicator"><span></span><span></span><span></span></div>
+                </div>
+            </div>
+            `;
+            chatContainer.insertAdjacentHTML('beforeend', typingHtml);
+            chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
+        };
+
+        const removeTyping = () => {
+            const indicator = document.getElementById('typing-indicator-box');
+            if (indicator) indicator.remove();
+        };
+
+        const sendMessage = async (message) => {
+            if (!currentThreadId) currentThreadId = generateUUID();
+            
+            addDebugLog('NET', `POST -> /api/chat | payload=${message.substring(0,20)}...`);
+            
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        thread_id: currentThreadId,
+                        cpf: authCpf
+                    })
+                });
+                
+                if (!response.ok) throw new Error('API Error ' + response.status);
+                
+                const data = await response.json();
+                addDebugLog('NET', `200 OK | received response`);
+
+                // Detect Agent Transition (Silently)
+                if (data.current_agent !== lastReportedAgent) {
+                    addDebugLog('LANGGRAPH', `⚠️ TRANSIÇÃO DE AGENTE: ${lastReportedAgent.toUpperCase()} => ${data.current_agent.toUpperCase()}`, true);
+                    lastReportedAgent = data.current_agent;
+                } else {
+                    addDebugLog('REDUCER', `Worker ativo: ${data.current_agent.toUpperCase()}`);
+                }
+                
+                // Detection of Thread Hopping 
+                if (data.thread_id !== currentThreadId) {
+                    addDebugLog('SQLITE', `🔄 THREAD HOPPING EXECUTADO! ID alterado de Temp UUID para CPF base: ${data.thread_id}`, true);
+                    currentThreadId = data.thread_id;
+                    authCpf = data.cpf;
+                }
+                
+                return data.response;
+                
+            } catch (err) {
+                console.error(err);
+                addDebugLog('ERROR', `Falha ao alcançar backend em ${API_URL}`);
+                return "Desculpe, ocorreu um erro de conexão com os servidores do banco FastAPI.";
+            }
+        };
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = messageInput.value.trim();
+            if (!text) return;
+            
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            
+            addUserMessage(text);
+            showTyping();
+            
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+            sendBtn.classList.add('opacity-50');
+            
+            const botResponse = await sendMessage(text);
+            
+            removeTyping();
+            addBotMessage(botResponse);
+            
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            sendBtn.classList.remove('opacity-50');
+            messageInput.focus();
+        });
+
+        const resetChat = () => {
+            location.reload();
+        };
+
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight < 120 ? this.scrollHeight : 120) + 'px';
+        });
+    </script>
+</body>
+</html>
