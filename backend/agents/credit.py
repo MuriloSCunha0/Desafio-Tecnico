@@ -22,12 +22,12 @@ def _extract_amount(text: str) -> float:
 
 CREDIT_SYSTEM_PROMPT = """Você é a Bia, gerente de crédito do Banco Ágil.
 {name_line}
+CPF do cliente: {cpf}
 
-Ferramentas: check_limit | request_limit_increase | transfer_to_interview | end_conversation
+Ferramentas disponíveis: {tools_list}
 
 Regras:
-- Limite/score: chame check_limit. NUNCA invente valores.
-- Aumento solicitado: chame request_limit_increase(cpf, valor).
+{check_limit_rule}- Aumento solicitado: chame request_limit_increase com cpf="{cpf}" e o valor informado pelo cliente.
   APROVADO → comemore com entusiasmo real, seja genuíno.
   REJEITADO → seja empático e humano. Ofereça a entrevista de reavaliação como uma oportunidade, não como um roteiro.
 - Cliente aceitar entrevista → chame transfer_to_interview.
@@ -78,11 +78,23 @@ def credit_agent(state: dict) -> dict:
             }
 
     llm = get_llm()
-    llm_with_tools = llm.bind_tools([check_limit, request_limit_increase, end_conversation, transfer_to_interview])
+    # Não oferece check_limit ao LLM se já foi consultado — evita re-chamada com CPF errado
+    available_tools = [request_limit_increase, end_conversation, transfer_to_interview]
+    if not check_done:
+        available_tools.insert(0, check_limit)
+    llm_with_tools = llm.bind_tools(available_tools)
 
-    user_name     = state.get("current_user_name", "")
-    name_line     = f"Cliente: {user_name}" if user_name else ""
-    system_prompt = CREDIT_SYSTEM_PROMPT.format(name_line=name_line)
+    user_name  = state.get("current_user_name", "")
+    name_line  = f"Cliente: {user_name}" if user_name else ""
+    tools_list = " | ".join(t.name for t in available_tools)
+    check_limit_rule = (
+        f'- Limite/score: chame check_limit com cpf="{cpf}". NUNCA invente valores.\n'
+        if not check_done else ""
+    )
+    system_prompt = CREDIT_SYSTEM_PROMPT.format(
+        name_line=name_line, cpf=cpf,
+        tools_list=tools_list, check_limit_rule=check_limit_rule,
+    )
 
     msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
     response = _invoke_with_retry(llm_with_tools, msgs)

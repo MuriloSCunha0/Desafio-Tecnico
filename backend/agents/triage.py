@@ -6,25 +6,20 @@ from agents.core import (
     _extract_cpf, _make_tool_call_message, _invoke_with_retry, _trim_messages
 )
 
-TRIAGE_CPF_PROMPT = """Você é o Bia, assistente do Banco Ágil.
-Cumprimente de forma calorosa e natural — sem ser formal demais. Peça o CPF (só números).
-Se quiser encerrar: end_conversation.
-Varie o cumprimento, não use sempre o mesmo. Emoji leve, sem exagero. Português do Brasil."""
+TRIAGE_COMBINED_PROMPT = """Você é o Bia, assistente do Banco Ágil.
+Cumprimente de forma calorosa e natural — sem ser formal demais.
+Peça o CPF (só números) e a data de nascimento (DD/MM/AAAA) juntos, em uma única mensagem curta.
+Varie o cumprimento, não use sempre o mesmo. Emoji leve, sem exagero.
+Se quiser encerrar: end_conversation. Português do Brasil."""
 
 TRIAGE_DOB_PROMPT = """Você é o Bia, assistente do Banco Ágil.
 CPF recebido: {cpf}
-Agradeça de forma natural e peça a data de nascimento (DD/MM/AAAA). Não peça o CPF de novo.
-Seja breve e amigável, como uma conversa real. Português do Brasil."""
-
-TRIAGE_AUTH_CALL_PROMPT = """Você é o Bia, assistente do Banco Ágil.
-Chame authenticate_user com cpf="{cpf}" e date_of_birth="{dob}".
-SUCESSO → seja caloroso, chame pelo primeiro nome, pergunte o que deseja de forma descontraída.
-FALHA → seja empático e humano, não robótico.
-Português do Brasil."""
+Preciso também da sua data de nascimento (DD/MM/AAAA) para concluir o acesso. Seja breve. Português do Brasil."""
 
 TRIAGE_RETRY_PROMPT = """Você é o Bia, assistente do Banco Ágil.
-CPF: {cpf} | Tentativas restantes: {remaining}
-Autenticação falhou. Seja compreensivo e natural — erros acontecem. Peça a data novamente (DD/MM/AAAA).
+Tentativas restantes: {remaining}
+Autenticação falhou. Seja compreensivo e natural — erros acontecem.
+Peça o CPF e a data de nascimento novamente juntos, em uma mensagem curta.
 Se quiser encerrar: end_conversation. Português do Brasil."""
 
 TRIAGE_ROUTING_PROMPT = """Você é o Bia, assistente do Banco Ágil.
@@ -85,40 +80,33 @@ def triage_agent(state: dict) -> dict:
 
     if _last_msg_is_tool(messages):
         remaining = max(0, 3 - auth_attempts)
-        if pending_cpf and auth_attempts > 0:
-            system_prompt = TRIAGE_RETRY_PROMPT.format(
-                cpf=pending_cpf, remaining=remaining
-            )
-        else:
-            system_prompt = TRIAGE_DOB_PROMPT.format(cpf=pending_cpf or "???")
+        system_prompt = TRIAGE_RETRY_PROMPT.format(remaining=remaining)
         llm_with_tools = llm.bind_tools([end_conversation])
         msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
         response = _invoke_with_retry(llm_with_tools, msgs)
-        return {"messages": [response], "current_agent": "triage", "routing_target": ""}
-
-    if pending_cpf and _last_msg_is_human(messages):
-        dob = _extract_dob_from_last_human(messages)
-        if dob:
-            return {
-                "messages": [_make_tool_call_message(
-                    "authenticate_user", {"cpf": pending_cpf, "date_of_birth": dob}
-                )],
-                "current_agent": "triage",
-                "routing_target": "",
-            }
-
-        system_prompt  = TRIAGE_DOB_PROMPT.format(cpf=pending_cpf)
-        llm_with_tools = llm.bind_tools([end_conversation])
-        msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
-        response = _invoke_with_retry(llm_with_tools, msgs)
-        return {"messages": [response], "current_agent": "triage", "routing_target": ""}
+        return {"messages": [response], "current_agent": "triage", "routing_target": "", "pending_cpf": ""}
 
     if _last_msg_is_human(messages):
         cpf = _extract_cpf(messages)
+        dob = _extract_dob_from_last_human(messages)
+
+        # Usuário enviou CPF e data juntos — autentica direto
+        if cpf and dob:
+            return {
+                "messages": [_make_tool_call_message(
+                    "authenticate_user", {"cpf": cpf, "date_of_birth": dob}
+                )],
+                "current_agent":  "triage",
+                "pending_cpf":    cpf,
+                "routing_target": "",
+            }
+
+        # Usuário enviou só o CPF — pede a data
         if cpf:
-            system_prompt = TRIAGE_DOB_PROMPT.format(cpf=cpf)
+            system_prompt  = TRIAGE_DOB_PROMPT.format(cpf=cpf)
+            llm_with_tools = llm.bind_tools([end_conversation])
             msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
-            response = _invoke_with_retry(llm, msgs)
+            response = _invoke_with_retry(llm_with_tools, msgs)
             return {
                 "messages":       [response],
                 "current_agent":  "triage",
@@ -126,13 +114,24 @@ def triage_agent(state: dict) -> dict:
                 "routing_target": "",
             }
 
-        system_prompt  = TRIAGE_CPF_PROMPT
+        # Usuário já tinha CPF salvo e enviou só a data
+        if pending_cpf and dob:
+            return {
+                "messages": [_make_tool_call_message(
+                    "authenticate_user", {"cpf": pending_cpf, "date_of_birth": dob}
+                )],
+                "current_agent":  "triage",
+                "routing_target": "",
+            }
+
+        # Nada reconhecido — pede CPF e data juntos
+        system_prompt  = TRIAGE_COMBINED_PROMPT
         llm_with_tools = llm.bind_tools([end_conversation])
         msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
         response = _invoke_with_retry(llm_with_tools, msgs)
         return {"messages": [response], "current_agent": "triage", "routing_target": ""}
 
-    system_prompt  = TRIAGE_CPF_PROMPT
+    system_prompt  = TRIAGE_COMBINED_PROMPT
     llm_with_tools = llm.bind_tools([end_conversation])
     msgs     = [SystemMessage(content=system_prompt)] + messages
     response = llm_with_tools.invoke(msgs)

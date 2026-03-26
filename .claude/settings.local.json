@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python test_full_flow.py)",
+      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python test_full_flow.py)"
+    ]
+  }
+}

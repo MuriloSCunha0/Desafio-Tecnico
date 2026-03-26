@@ -26,10 +26,20 @@ CPF: {cpf}
 Campos já coletados: {already_collected}
 Faltam coletar: {missing_fields}
 
-Faça UMA pergunta por vez sobre os campos que faltam. Seja natural, como uma conversa entre amigos — não um formulário.
+Pergunte sobre ATÉ DOIS campos por mensagem, agrupando os que fazem sentido juntos:
+- renda mensal + tipo de emprego (andam juntos — falam do trabalho)
+- despesas fixas + dependentes (andam juntos — falam dos gastos)
+- dívidas ativas (pergunta sozinha — é sim/não)
+
+Se faltar apenas um campo, pergunte só sobre ele.
+Seja natural e conciso — uma frase só por pergunta, como numa conversa.
 Aceite respostas informais: "ganho dois mil"→2000, "CLT"→formal, "faço bico"→autônomo, "nenhum"→0 dependentes.
-Quando tiver TODOS os 5 campos: chame calculate_and_update_score IMEDIATAMENTE. Não estime, não invente.
-Se quiser encerrar: end_conversation.
+
+REGRAS CRÍTICAS:
+- NUNCA assuma ou invente valores para campos que o cliente ainda não informou.
+- NUNCA inclua JSON ou dados estruturados na sua resposta de texto.
+- Chame calculate_and_update_score SOMENTE quando TODOS os 5 campos estiverem em "Campos já coletados".
+- Se quiser encerrar: end_conversation.
 
 Tom: Leve, empático, curioso. Português do Brasil."""
 
@@ -260,4 +270,17 @@ def interview_agent(state: dict) -> dict:
     msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
     response = _invoke_with_retry(llm.bind_tools([calculate_and_update_score, end_conversation]), msgs)
 
+    # Groq às vezes vaza JSON no texto da resposta — limpa sem usar os valores assumidos.
+    # A coleta continua normalmente; o caminho determinístico chama a tool quando tiver tudo.
+    cleaned = _strip_leaked_json(response.content)
+    if cleaned != (response.content or ""):
+        response = AIMessage(content=cleaned, tool_calls=[], additional_kwargs={})
+
     return {"messages": [response], "current_agent": "interview", "routing_target": ""}
+
+
+def _strip_leaked_json(content) -> str:
+    """Remove JSON vazado pelo LLM no texto (Groq às vezes não formata tool calls corretamente)."""
+    if not isinstance(content, str):
+        return content or ""
+    return re.sub(r'\s*\{[^{}]*"cpf"[^{}]*\}', "", content).strip()
