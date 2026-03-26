@@ -105,6 +105,17 @@ def tool_executor(state: AgentState) -> dict:
 
         elif tool_name == "end_conversation":
             state_updates["current_agent"] = "ended"
+            # Gera despedida personalizada com o nome do cliente
+            user_name = state.get("current_user_name", "")
+            first_name = user_name.split()[0] if user_name else ""
+            farewell_options = [
+                f"Foi um prazer te atender{', ' + first_name if first_name else ''}! 😊 Se precisar de qualquer coisa, é só voltar. Até logo!",
+                f"Encerrando por aqui{', ' + first_name if first_name else ''}! 🙌 Qualquer dúvida, estamos sempre à disposição. Cuide-se!",
+                f"Tudo certo{', ' + first_name if first_name else ''}! 👋 Foi ótimo ajudar você hoje. Conte com o Banco Ágil sempre que precisar!",
+            ]
+            import random
+            farewell = random.choice(farewell_options)
+            results.append(AIMessage(content=farewell))
 
     return {"messages": results, **state_updates}
 

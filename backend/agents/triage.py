@@ -3,68 +3,36 @@ from tools import authenticate_user, end_conversation
 from agents.core import (
     get_llm, _get_last_human_content, _detect_routing_target,
     _last_msg_is_tool, _last_msg_is_human, _extract_dob_from_last_human,
-    _extract_cpf, _make_tool_call_message
+    _extract_cpf, _make_tool_call_message, _invoke_with_retry, _trim_messages
 )
 
-TRIAGE_CPF_PROMPT = """Você é o Agilito, o assistente virtual parceiro do Banco Ágil.
+TRIAGE_CPF_PROMPT = """Você é o Bia, assistente do Banco Ágil.
+Cumprimente de forma calorosa e natural — sem ser formal demais. Peça o CPF (só números).
+Se quiser encerrar: end_conversation.
+Varie o cumprimento, não use sempre o mesmo. Emoji leve, sem exagero. Português do Brasil."""
 
-TAREFA: Recepção inicial. Cumprimente o cliente com entusiasmo e muita clareza, e peça o CPF (avise que pode ser só os números).
-
-Regras:
-- Não peça data de nascimento ainda.
-- Se o cliente quiser encerrar, chame end_conversation.
-- Não chame nenhuma outra ferramenta.
-
-Tom: Caloroso, rápido e super humano. Pode usar emoji (ex: 🏦 ou 👋). Português do Brasil."""
-
-TRIAGE_DOB_PROMPT = """Você é o Agilito, assistente virtual do Banco Ágil.
-
+TRIAGE_DOB_PROMPT = """Você é o Bia, assistente do Banco Ágil.
 CPF recebido: {cpf}
+Agradeça de forma natural e peça a data de nascimento (DD/MM/AAAA). Não peça o CPF de novo.
+Seja breve e amigável, como uma conversa real. Português do Brasil."""
 
-TAREFA: Agradeça por fornecer o CPF. Agora, para garantir a segurança da conta, peça a data de nascimento no formato DD/MM/AAAA.
+TRIAGE_AUTH_CALL_PROMPT = """Você é o Bia, assistente do Banco Ágil.
+Chame authenticate_user com cpf="{cpf}" e date_of_birth="{dob}".
+SUCESSO → seja caloroso, chame pelo primeiro nome, pergunte o que deseja de forma descontraída.
+FALHA → seja empático e humano, não robótico.
+Português do Brasil."""
 
-Regras:
-- Não peça o CPF novamente. Você já tem: {cpf}
-- Não invente nem suponha a data.
-- NÃO chame nenhuma ferramenta. Apenas responda com texto batendo um papo e pedindo a data.
+TRIAGE_RETRY_PROMPT = """Você é o Bia, assistente do Banco Ágil.
+CPF: {cpf} | Tentativas restantes: {remaining}
+Autenticação falhou. Seja compreensivo e natural — erros acontecem. Peça a data novamente (DD/MM/AAAA).
+Se quiser encerrar: end_conversation. Português do Brasil."""
 
-Tom: Super amigável e focado em segurança 🔒. Português do Brasil."""
-
-TRIAGE_AUTH_CALL_PROMPT = """Você é o Agilito, assistente virtual do Banco Ágil.
-
-AÇÃO IMEDIATA: Chame agora a ferramenta authenticate_user com os dados abaixo.
-
-  cpf = "{cpf}"
-  date_of_birth = "{dob}"
-
-Após o resultado:
-- SUCESSO → comemore a autenticação 🎉, chame o cliente pelo primeiro nome e pergunte animadamente o que ele deseja fazer hoje.
-- FALHA → seja muito empático, peça desculpas informando que os dados não bateram.
-
-Tom: Entusiástico e prestativo. Português do Brasil."""
-
-TRIAGE_RETRY_PROMPT = """Você é o Agilito, assistente virtual do Banco Ágil.
-
-CPF: {cpf}
-Tentativas restantes: {remaining}
-
-A autenticação falhou. Seja compreensivo e diga que é normal errar. Peça gentilmente a data de nascimento de novo (DD/MM/AAAA) avisando sobre as tentativas.
-Se o cliente quiser encerrar, chame end_conversation.
-
-Tom: Empático e encorajador. Português do Brasil."""
-
-TRIAGE_ROUTING_PROMPT = """Você é o Agilito, assistente virtual do Banco Ágil.
+TRIAGE_ROUTING_PROMPT = """Você é o Bia, assistente do Banco Ágil.
 Cliente: {name}
-
-Cumprimente pelo nome (de forma bem pessoal, ex "E aí [nome], como estamos?") e pergunte como pode ajudar.
-Serviços disponíveis:
-- Ver limites e score 💳
-- Pedir mais crédito 📈
-- Fazer uma reavaliação (entrevista rápida) 📊
-- Checar cotação de moedas 💱
-
-Se o cliente quiser encerrar, chame end_conversation.
-Tom: Extrovertido, acolhedor e resolutivo. Português do Brasil."""
+Cumprimente pelo primeiro nome de forma descontraída (ex: "E aí, João!" ou "Oi, Maria!").
+Pergunte o que deseja. Serviços disponíveis: limites/score 💳, crédito 📈, reavaliação 📊, câmbio 💱.
+Seja natural — não liste serviços de forma mecânica. Se quiser encerrar: end_conversation.
+Português do Brasil."""
 
 def triage_agent(state: dict) -> dict:
     llm = get_llm()
@@ -111,8 +79,8 @@ def triage_agent(state: dict) -> dict:
 
         system_prompt  = TRIAGE_ROUTING_PROMPT.format(name=user_name)
         llm_with_tools = llm.bind_tools([end_conversation])
-        msgs     = [SystemMessage(content=system_prompt)] + messages
-        response = llm_with_tools.invoke(msgs)
+        msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
+        response = _invoke_with_retry(llm_with_tools, msgs)
         return {"messages": [response], "current_agent": "triage", "routing_target": ""}
 
     if _last_msg_is_tool(messages):
@@ -124,8 +92,8 @@ def triage_agent(state: dict) -> dict:
         else:
             system_prompt = TRIAGE_DOB_PROMPT.format(cpf=pending_cpf or "???")
         llm_with_tools = llm.bind_tools([end_conversation])
-        msgs     = [SystemMessage(content=system_prompt)] + messages
-        response = llm_with_tools.invoke(msgs)
+        msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
+        response = _invoke_with_retry(llm_with_tools, msgs)
         return {"messages": [response], "current_agent": "triage", "routing_target": ""}
 
     if pending_cpf and _last_msg_is_human(messages):
@@ -141,16 +109,16 @@ def triage_agent(state: dict) -> dict:
 
         system_prompt  = TRIAGE_DOB_PROMPT.format(cpf=pending_cpf)
         llm_with_tools = llm.bind_tools([end_conversation])
-        msgs     = [SystemMessage(content=system_prompt)] + messages
-        response = llm_with_tools.invoke(msgs)
+        msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
+        response = _invoke_with_retry(llm_with_tools, msgs)
         return {"messages": [response], "current_agent": "triage", "routing_target": ""}
 
     if _last_msg_is_human(messages):
         cpf = _extract_cpf(messages)
         if cpf:
             system_prompt = TRIAGE_DOB_PROMPT.format(cpf=cpf)
-            msgs     = [SystemMessage(content=system_prompt)] + messages
-            response = llm.invoke(msgs)
+            msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
+            response = _invoke_with_retry(llm, msgs)
             return {
                 "messages":       [response],
                 "current_agent":  "triage",
@@ -160,8 +128,8 @@ def triage_agent(state: dict) -> dict:
 
         system_prompt  = TRIAGE_CPF_PROMPT
         llm_with_tools = llm.bind_tools([end_conversation])
-        msgs     = [SystemMessage(content=system_prompt)] + messages
-        response = llm_with_tools.invoke(msgs)
+        msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
+        response = _invoke_with_retry(llm_with_tools, msgs)
         return {"messages": [response], "current_agent": "triage", "routing_target": ""}
 
     system_prompt  = TRIAGE_CPF_PROMPT

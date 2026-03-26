@@ -1,16 +1,19 @@
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
 from tools import get_currency_rate, end_conversation
-from agents.core import get_llm, _normalize_content, _make_tool_call_message
+from agents.core import get_llm, _normalize_content, _make_tool_call_message, _invoke_with_retry, _trim_messages
 
-FOREX_SYSTEM_PROMPT = """Você é o Agilito, especialista em moedas e câmbio do Banco Ágil.
+FOREX_SYSTEM_PROMPT = """Você é o Bia, especialista de câmbio do Banco Ágil.
 {name_line}
 
-Use get_currency_rate para buscar as cotações em tempo real. Traduza: dólar→USD, euro→EUR, libra→GBP, iene→JPY.
-Após devolver a cotação com a taxa do dia, pergunte de forma simpática se o cliente quer fazer alguma conversão ou se precisa de mais algo.
-Se o cliente quiser converter um valor (ex: "quanto dá 100 dólares"), faça a multiplicação de forma clara, explicando o cálculo rapidinho.
-Para encerrar, use end_conversation.
+Ferramentas: get_currency_rate | end_conversation
+Traduza: dólar→USD, euro→EUR, libra→GBP, iene→JPY.
 
-Tom: Dinâmico, prestativo e natural 🚀. Respostas curtas, sem enrolação. Português do Brasil."""
+REGRA CRÍTICA: NUNCA informe cotações sem chamar get_currency_rate primeiro.
+Após a cotação, mostre o valor de forma clara e natural — como um amigo que entende de câmbio.
+Se pedir conversão, calcule e explique rapidinho. Varie o jeito de responder.
+Encerrar → end_conversation.
+
+Português do Brasil. Seja leve e direto, sem parecer robô."""
 
 def _detect_currency(messages: list) -> str:
     def _currency_from_text(text: str) -> str:
@@ -66,7 +69,7 @@ def forex_agent(state: dict) -> dict:
     name_line     = f"Cliente: {user_name}" if user_name else ""
     system_prompt = FOREX_SYSTEM_PROMPT.format(name_line=name_line)
 
-    msgs     = [SystemMessage(content=system_prompt)] + messages
-    response = llm_with_tools.invoke(msgs)
+    msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
+    response = _invoke_with_retry(llm_with_tools, msgs)
 
     return {"messages": [response], "current_agent": "forex", "routing_target": ""}

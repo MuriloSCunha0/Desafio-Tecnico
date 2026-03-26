@@ -1,10 +1,26 @@
 import os
 import re
+import time
 import uuid
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 load_dotenv()
+
+def _invoke_with_retry(llm, msgs, max_retries: int = 4):
+    """Invoca o LLM com retry automático para Rate Limit (429) do Groq/Google."""
+    delay = 5
+    for attempt in range(max_retries):
+        try:
+            return llm.invoke(msgs)
+        except Exception as e:
+            err = str(e)
+            is_rate_limit = "429" in err or "rate_limit" in err.lower() or "Rate limit" in err
+            if is_rate_limit and attempt < max_retries - 1:
+                wait = delay * (2 ** attempt)  # 5s, 10s, 20s, 40s
+                time.sleep(wait)
+                continue
+            raise
 
 def get_llm():
     provider = os.getenv("LLM_PROVIDER", "ollama").lower().strip()
@@ -123,6 +139,13 @@ def _make_tool_call_message(tool_name: str, args: dict) -> AIMessage:
             "args": args,
         }],
     )
+
+def _trim_messages(messages: list, max_messages: int = 4) -> list:
+    """Retorna apenas as últimas N mensagens para enviar ao LLM.
+    Sempre preserva ToolMessages para não quebrar o protocolo tool_call→tool_result."""
+    if len(messages) <= max_messages:
+        return messages
+    return messages[-max_messages:]
 
 def _has_tool_result(messages: list, substring: str) -> bool:
     return any(

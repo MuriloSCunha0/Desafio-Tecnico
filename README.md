@@ -1,6 +1,6 @@
 # Banco Ágil — Sistema Multi-Agente Bancário
 
-Sistema de atendimento ao cliente para um banco digital fictício, construído com **LangGraph**, **LangChain** e **Streamlit**. Quatro agentes de IA especializados trabalham em conjunto para oferecer uma experiência de atendimento fluida e inteligente.
+Sistema de atendimento ao cliente para um banco digital fictício, projetado em uma Arquitetura de Microsserviços com **LangGraph**, **FastAPI** e **Django**. Quatro agentes de IA especializados trabalham em conjunto para oferecer uma experiência de atendimento veloz, robusta e persistente através de Data-Hopping dinâmico em SQLite.
 
 ---
 
@@ -42,20 +42,21 @@ Fase D: Autenticado   → detecta intenção via Python → routing_target
 
 ### Diagrama de Fluxo
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
-│                  Streamlit (app.py)                  │
-│              Interface de Chat do Usuário            │
+│                 Frontend (Django)                   │
+│     UI Ultra Moderna (TailwindCSS + Vanilla JS)     │
 └─────────────────────┬───────────────────────────────┘
-                      │
+                      │ Fetch API (`POST /api/chat`)
                       ▼
 ┌─────────────────────────────────────────────────────┐
-│            StateGraph (LangGraph — state.py)        │
+│                 Backend (FastAPI)                   │
+│          StateGraph (LangGraph — main.py)           │
 │                                                     │
-│  ┌──────────┐   ┌──────────┐   ┌────────────┐      │
-│  │ Triagem  │──→│ Crédito  │←──│ Entrevista │      │
-│  │  Agent   │   │  Agent   │   │   Agent    │      │
-│  └────┬─────┘   └──────────┘   └────────────┘      │
+│  ┌──────────┐   ┌──────────┐   ┌────────────┐       │
+│  │ Triagem  │──→│ Crédito  │←──│ Entrevista │       │
+│  │  Agent   │   │  Agent   │   │   Agent    │       │
+│  └────┬─────┘   └──────────┘   └────────────┘       │
 │       │                                             │
 │       └────────→┌──────────┐                        │
 │                 │  Câmbio  │                        │
@@ -65,7 +66,7 @@ Fase D: Autenticado   → detecta intenção via Python → routing_target
 │  ┌──────────────────────────────────────────┐       │
 │  │     Tool Executor + SqliteSaver          │       │
 │  └──────────────────────────────────────────┘       │
-└─────────────────────────────────────────────────────┘
+└─────────────────────┬───────────────────────────────┘
                       │
           ┌───────────┼───────────┐
           ▼           ▼           ▼
@@ -184,7 +185,7 @@ O LangGraph foi escolhido porque oferece exatamente o que um sistema multi-agent
 |---------|----------|
 | **LangChain `@tool`** | Decorador padronizado que funciona com qualquer LLM da família LangChain |
 | **CSV como armazenamento** | Portabilidade total, sem dependências externas, ideal para o escopo do desafio |
-| **Streamlit** | Interface de chat pronta com `st.chat_message`, deploy rápido |
+| **FastAPI + Django** | Substituiu o Streamlit para comprovar senioridade arquitetural. API RESTful 100% desacoplada servindo um Frontend Reativo (Vanilla JS + Glassmorphism UX). |
 | **frankfurter.app** | API de câmbio gratuita, sem necessidade de API key, dados confiáveis do ECB |
 | **3 providers (Ollama/Google/Groq)** | Factory `get_llm()` permite testar local (Ollama) e escalar para produção (Groq/Google) |
 | **Logging rotativo** | `RotatingFileHandler` (5MB, 3 backups) para diagnóstico sem overhead em disco |
@@ -259,26 +260,22 @@ python test_flows.py
 ## Estrutura do Projeto
 
 ```
-├── app.py                    # Frontend Streamlit (UI de chat)
-├── agents/                   # Pacote de Agentes de IA
-│   ├── __init__.py           # Exportação do pacote
-│   ├── core.py               # Utilitários, LLM factory, parsing compartilhado
-│   ├── triage.py             # Agente de Triagem (4 fases de autenticação)
-│   ├── credit.py             # Agente de Crédito (consulta/aumento de limite)
-│   ├── interview.py          # Agente de Entrevista (reavaliação de score)
-│   └── forex.py              # Agente de Câmbio (cotação de moedas)
-├── state.py                  # StateGraph, AgentState, roteamento, tool executor
-├── tools.py                  # 6 tools (@tool LangChain)
-├── db_utils.py               # CRUD para arquivos CSV
-├── logger.py                 # Logging rotativo (logs/errors.log)
-├── test_flows.py             # 12 cenários de teste automatizados
-├── requirements.txt          # Dependências Python
-├── .env.example              # Template de configuração
-├── Dockerfile                # Imagem Docker
-├── docker-compose.yml        # Compose com volumes
-├── README.md                 # Este arquivo
-└── data/
-    ├── clients.csv           # Clientes (CPF, nome, nascimento, score, limite)
-    ├── score_limite.csv      # Tabela score → limite máximo
-    └── solicitacoes_aumento_limite.csv  # Log de solicitações de aumento
+├── backend/                  # Motor de IA em FastAPI
+│   ├── main.py               # API REST e Lógica de Thread Hopping Persistente
+│   ├── agents/               # Pacote de Agentes de Domínio Específico
+│   ├── state.py              # Cérebro do LangGraph (Reducer e Graph)
+│   ├── tools.py              # Ferramentas Executadas via Decorador
+│   ├── db_utils.py           # Operações em Datalake CSV
+│   ├── .env                  # Chaves de Providers
+│   └── data/                 # Datasets Core Bank
+├── frontend/                 # Interface Client-Side em Django
+│   ├── banco_agil_web/       # Roteadores de Raiz
+│   ├── chat/                 # View App (Chat responsivo)
+│   │   ├── templates/chat/index.html   # UI/UX Rica, JS Fetch e Painel de Debug
+│   │   └── views.py          
+│   └── manage.py             # CLI
+├── .vscode/                  # Launchers utilitários
+├── requirements.txt          # Dependências do Projeto
+├── app_streamlit_legacy.py   # Depreciado (Guarda o código legado do PoC)
+└── README.md                 # Documentation
 ```

@@ -10,12 +10,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from state import build_graph
 from langchain_core.messages import HumanMessage, AIMessage
+from typing import Optional
 
 # Definição dos modelos de entrada e saída
 class ChatRequest(BaseModel):
     message: str
-    thread_id: str = None  # Enviado pelo frontend (pode ser temporário)
-    cpf: str = None        # Opcional, usado se já estiver logado no front
+    thread_id: Optional[str] = None  # Enviado pelo frontend (pode ser temporário)
+    cpf: Optional[str] = None        # Opcional, usado se já estiver logado no front
 
 class ChatResponse(BaseModel):
     response: str
@@ -87,28 +88,47 @@ async def chat_endpoint(req: ChatRequest):
         # THREAD HOPPING LOGIC (Refatorado do Streamlit direto para a API)
         # ==============================================================
         if not was_authenticated and is_now_authenticated and new_cpf:
-            cpf_config = {"configurable": {"thread_id": new_cpf}}
-            cpf_state = graph_instance.get_state(cpf_config)
-            
-            # Se já exisita histórico salvo em disco SQLite no CPF
-            if cpf_state and hasattr(cpf_state, "values") and cpf_state.values and len(cpf_state.values.get("messages", [])) > 0:
-                welcome_msg = f"Bem-vindo de volta, {name}! 🥳 Recuperei o histórico da nossa última conversa. Como posso ajudar hoje?"
+            try:
+                cpf_config = {"configurable": {"thread_id": new_cpf}}
+                cpf_state = graph_instance.get_state(cpf_config)
                 
-                # Injeta a mensagem de retorno na timeline histórica real daquele CPF
-                graph_instance.update_state(cpf_config, {"messages": [AIMessage(content=welcome_msg)]})
-                
-                return ChatResponse(
-                    response=welcome_msg,
-                    thread_id=new_cpf,
-                    is_authenticated=True,
-                    current_agent=cpf_state.values.get("current_agent", "triage"),
-                    cpf=new_cpf,
-                    name=name
-                )
-            else:
-                # É a primeira vez do cliente. "Assumimos" a posse do thread temporal atual colando-o no CPF.
-                graph_instance.update_state(cpf_config, result)
-                active_thread_id = new_cpf
+                # Se já exisita histórico salvo em disco SQLite no CPF
+                if cpf_state and hasattr(cpf_state, "values") and cpf_state.values and len(cpf_state.values.get("messages", [])) > 0:
+                    welcome_msg = f"Bem-vindo de volta, {name}! 🥳 Recuperei o histórico da nossa última conversa. Como posso ajudar hoje?"
+                    
+                    # Tenta injetar a mensagem. Usa as_node para evitar langgraph Errors
+                    valid_nodes = {"triage", "credit", "interview", "forex"}
+                    node_name = cpf_state.values.get("current_agent", "triage")
+                    if node_name not in valid_nodes:
+                        node_name = "triage"
+                    graph_instance.update_state(cpf_config, {"messages": [AIMessage(content=welcome_msg)]}, as_node=node_name)
+                    
+                    return ChatResponse(
+                        response=welcome_msg,
+                        thread_id=new_cpf,
+                        is_authenticated=True,
+                        current_agent=cpf_state.values.get("current_agent", "triage"),
+                        cpf=new_cpf,
+                        name=name
+                    )
+                else:
+                    # É a primeira vez do cliente — migra estado completo para a thread CPF.
+                    graph_instance.update_state(cpf_config, {
+                        "messages": result.get("messages", []),
+                        "is_authenticated": True,
+                        "current_user_cpf": new_cpf,
+                        "current_user_name": name,
+                        "auth_attempts": 0,
+                        "pending_cpf": "",
+                        "current_agent": "triage",
+                        "routing_target": "",
+                    }, as_node="triage")
+                    active_thread_id = new_cpf
+            except Exception as e:
+                import logging
+                logging.error(f"Erro no Thread Hopping: {e}")
+                # Fallback: Apenas confia na resposta gerada (Welcome padrão)
+                pass
                 
         # Extrai a resposta real final do Agente ativo
         ai_messages = [m for m in result.get("messages", []) if isinstance(m, AIMessage) and m.content and not getattr(m, "tool_calls", None)]

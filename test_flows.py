@@ -462,8 +462,8 @@ def generate_report(results: list, timestamp: str) -> str:
 # ============================================================
 
 if __name__ == "__main__":
-    # Número de workers paralelos (ajuste conforme CPU/API disponível)
-    MAX_WORKERS = int(os.getenv("TEST_WORKERS", "4"))
+    # Número de workers paralelos — 2 para não exceder o TPM do Groq free tier
+    MAX_WORKERS = int(os.getenv("TEST_WORKERS", "2"))
 
     print("=" * 60)
     print("  Banco Agil -- Testes de Fluxo de Conversacao")

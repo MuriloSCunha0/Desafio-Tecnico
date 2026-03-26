@@ -1,41 +1,46 @@
 import re
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from tools import calculate_and_update_score, end_conversation
-from agents.core import get_llm, _normalize_content, _has_tool_result, _make_tool_call_message
+from agents.core import get_llm, _normalize_content, _make_tool_call_message, _invoke_with_retry, _trim_messages
 
-INTERVIEW_COLLECT_PROMPT = """Você é o Agilito, o consultor financeiro do Banco Ágil.
+
+def _has_unprocessed_reaval(messages: list) -> bool:
+    """Returns True only if the REAVALIAÇÃO CONCLUÍDA tool result hasn't been
+    addressed yet in this turn (i.e. no HumanMessage came after the last one)."""
+    last_reaval_idx = None
+    for i, m in enumerate(messages):
+        if isinstance(m, ToolMessage) and "REAVALIAÇÃO CONCLUÍDA" in str(m.content):
+            last_reaval_idx = i
+    if last_reaval_idx is None:
+        return False
+    # If any HumanMessage appears after the last reaval result, it was already handled
+    for m in messages[last_reaval_idx + 1:]:
+        if isinstance(m, HumanMessage):
+            return False
+    return True
+
+INTERVIEW_COLLECT_PROMPT = """Você é o Bia, consultor financeiro do Banco Ágil.
 {name_line}
-CPF do cliente: {cpf}
+CPF: {cpf}
 
-TAREFA: Bater um papo leve para entender o momento financeiro do cliente. Colete as 5 informações abaixo naturalmente. Quando tiver TODAS, chame calculate_and_update_score.
+Campos já coletados: {already_collected}
+Faltam coletar: {missing_fields}
 
-Informações necessárias:
-1. Renda mensal (em reais)
-2. Tipo de emprego: formal (CLT/carteira assinada), autônomo ou desempregado
-3. Despesas fixas mensais (em reais)
-4. Número de dependentes (0, 1, 2 ou 3+)
-5. Possui dívidas ativas? (sim ou não)
+Faça UMA pergunta por vez sobre os campos que faltam. Seja natural, como uma conversa entre amigos — não um formulário.
+Aceite respostas informais: "ganho dois mil"→2000, "CLT"→formal, "faço bico"→autônomo, "nenhum"→0 dependentes.
+Quando tiver TODOS os 5 campos: chame calculate_and_update_score IMEDIATAMENTE. Não estime, não invente.
+Se quiser encerrar: end_conversation.
 
-REGRAS OBRIGATÓRIAS:
-- Pergunte APENAS o que ainda falta. Faça uma pergunta por vez, de maneira conversacional, como se fosse um papo entre parceiros.
-- Aceite respostas informais: "ganho dois mil"→2000, "CLT"→formal, "faço bico"→autônomo.
-- QUANDO TIVER TODOS OS 5 DADOS: chame calculate_and_update_score IMEDIATAMENTE.
-  NÃO diga "vou processar", "aguarde", "calculando" nem descreva o resultado em texto.
-  Você NÃO consegue calcular score — somente a ferramenta calculate_and_update_score faz isso.
-  NUNCA invente ou estime valores de score ou limite. Chame a ferramenta e aguarde o resultado.
-- NÃO adicione ROTA:.
-- Se o cliente quiser encerrar, chame end_conversation.
+Tom: Leve, empático, curioso. Português do Brasil."""
 
-Tom: Extremamente paciente, empático e amigável. Não pareça um formulário da Receita Federal. Português do Brasil."""
-
-INTERVIEW_RESULT_PROMPT = """Você é o Agilito, consultor financeiro do Banco Ágil.
+INTERVIEW_RESULT_PROMPT = """Você é o Bia, consultor financeiro do Banco Ágil.
 {name_line}
 
-A reavaliação de crédito foi concluída com sucesso. 
-- Se o limite aumentou: Comemore de forma calorosa! 🎉 Informe o novo score e o novo limite de crédito disponível com entusiasmo.
-- Se manteve igual: Seja gentil e encorajador, dê uma dica rápida de educação financeira e informe o score/limite mantido.
+A reavaliação foi concluída. Compartilhe o resultado de forma genuína e calorosa.
+- Score melhorou: comemore de verdade, mostre empolgação real 🎉 — mencione o novo score e novo limite.
+- Score igual ou caiu: seja honesto e encorajador, dê uma dica prática de educação financeira.
 
-Tom: Entusiasmado, como um amigo dando boas notícias. Português do Brasil."""
+Seja humano, não robótico. Português do Brasil."""
 
 def _parse_employment(t: str) -> str:
     if "desempregado" in t or "sem emprego" in t or "sem trabalho" in t:
@@ -196,20 +201,29 @@ def interview_agent(state: dict) -> dict:
 
     name_line = f"Cliente: {user_name}" if user_name else ""
 
-    if _has_tool_result(messages, "REAVALIAÇÃO CONCLUÍDA"):
-        llm = get_llm()
-        system_prompt = INTERVIEW_RESULT_PROMPT.format(name_line=name_line)
-        msgs     = [SystemMessage(content=system_prompt)] + messages
-        response = llm.bind_tools([end_conversation]).invoke(msgs)
-        return {
-            "messages":       [response],
-            "current_agent":  "interview",
-            "routing_target": "credit",
-        }
-
-    fields   = _parse_interview_fields_context(messages)
     required = ["monthly_income", "employment_type", "monthly_expenses",
                 "dependents", "has_debts"]
+
+    FIELD_LABELS = {
+        "monthly_income":   "renda mensal",
+        "employment_type":  "tipo de emprego",
+        "monthly_expenses": "despesas fixas",
+        "dependents":       "dependentes",
+        "has_debts":        "dívidas ativas",
+    }
+
+    if _has_unprocessed_reaval(messages):
+        llm = get_llm()
+        system_prompt = INTERVIEW_RESULT_PROMPT.format(name_line=name_line)
+        msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
+        response = _invoke_with_retry(llm, msgs)  # No tools — just present the result
+        return {
+            "messages":       [response],
+            "current_agent":  "credit",   # next turn goes to credit
+            "routing_target": "",          # END this turn so user sees the result
+        }
+
+    fields = _parse_interview_fields_context(messages)
 
     if all(k in fields for k in required):
         return {
@@ -228,9 +242,22 @@ def interview_agent(state: dict) -> dict:
             "routing_target": "",
         }
 
+    # Resumo do que já foi coletado e o que ainda falta — evita depender do histórico longo
+    collected_str = ", ".join(
+        f"{FIELD_LABELS[k]}={fields[k]}" for k in required if k in fields
+    ) or "nenhum ainda"
+    missing_str = ", ".join(
+        FIELD_LABELS[k] for k in required if k not in fields
+    )
+
     llm = get_llm()
-    system_prompt = INTERVIEW_COLLECT_PROMPT.format(name_line=name_line, cpf=cpf)
-    msgs     = [SystemMessage(content=system_prompt)] + messages
-    response = llm.bind_tools([calculate_and_update_score, end_conversation]).invoke(msgs)
+    system_prompt = INTERVIEW_COLLECT_PROMPT.format(
+        name_line=name_line,
+        cpf=cpf,
+        already_collected=collected_str,
+        missing_fields=missing_str,
+    )
+    msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
+    response = _invoke_with_retry(llm.bind_tools([calculate_and_update_score, end_conversation]), msgs)
 
     return {"messages": [response], "current_agent": "interview", "routing_target": ""}
