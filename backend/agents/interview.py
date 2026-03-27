@@ -1,7 +1,7 @@
 import re
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from tools import calculate_and_update_score, end_conversation
-from agents.core import get_llm, _normalize_content, _make_tool_call_message, _invoke_with_retry, _trim_messages
+from agents.core import get_llm, _normalize_content, _make_tool_call_message, _invoke_with_retry, _trim_messages, _strip_llm_artifacts
 
 
 def _has_unprocessed_reaval(messages: list) -> bool:
@@ -270,17 +270,10 @@ def interview_agent(state: dict) -> dict:
     msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
     response = _invoke_with_retry(llm.bind_tools([calculate_and_update_score, end_conversation]), msgs)
 
-    # Groq às vezes vaza JSON no texto da resposta — limpa sem usar os valores assumidos.
+    # Groq às vezes vaza JSON / <function=...> no texto — limpa sem usar os valores assumidos.
     # A coleta continua normalmente; o caminho determinístico chama a tool quando tiver tudo.
-    cleaned = _strip_leaked_json(response.content)
+    cleaned = _strip_llm_artifacts(response.content)
     if cleaned != (response.content or ""):
         response = AIMessage(content=cleaned, tool_calls=[], additional_kwargs={})
 
     return {"messages": [response], "current_agent": "interview", "routing_target": ""}
-
-
-def _strip_leaked_json(content) -> str:
-    """Remove JSON vazado pelo LLM no texto (Groq às vezes não formata tool calls corretamente)."""
-    if not isinstance(content, str):
-        return content or ""
-    return re.sub(r'\s*\{[^{}]*"cpf"[^{}]*\}', "", content).strip()

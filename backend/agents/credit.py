@@ -1,7 +1,7 @@
 from langchain_core.messages import SystemMessage, AIMessage
 from langchain_core.tools import tool
 from tools import check_limit, request_limit_increase, end_conversation
-from agents.core import get_llm, _has_tool_result, _get_last_human_content, _make_tool_call_message, _invoke_with_retry, _trim_messages
+from agents.core import get_llm, _has_tool_result, _get_last_human_content, _make_tool_call_message, _invoke_with_retry, _trim_messages, _strip_llm_artifacts
 import re
 
 @tool
@@ -98,5 +98,10 @@ def credit_agent(state: dict) -> dict:
 
     msgs     = [SystemMessage(content=system_prompt)] + _trim_messages(messages)
     response = _invoke_with_retry(llm_with_tools, msgs)
+
+    # Remove artefatos Groq (JSON / <function=...> vazados no texto)
+    cleaned = _strip_llm_artifacts(response.content)
+    if cleaned != (response.content or ""):
+        response = AIMessage(content=cleaned, tool_calls=[], additional_kwargs={})
 
     return {"messages": [response], "current_agent": "credit", "routing_target": ""}

@@ -281,7 +281,49 @@ def get_currency_rate(currency: str) -> str:
 
     except requests.exceptions.RequestException as e:
         logger.error("get_currency_rate | currency=%s | %s", currency, e, exc_info=True)
-        return f"Erro ao consultar a API de câmbio: {str(e)}"
+        return f"Erro ao consultar a API de câmbio para 1 {currency}: {str(e)}"
+
+
+# ============================================================
+# Tool: Conversão entre Moedas
+# ============================================================
+
+@tool
+def convert_currency(from_currency: str, to_currency: str, amount: float = 1.0) -> str:
+    """
+    Converte um valor de uma moeda para outra usando a API de câmbio.
+
+    Args:
+        from_currency: Moeda de origem (ex: USD, EUR, GBP, JPY, BRL).
+        to_currency: Moeda de destino (ex: USD, EUR, GBP, JPY, BRL).
+        amount: Valor a converter (padrão: 1.0).
+
+    Returns:
+        Valor convertido e taxa de câmbio entre as moedas.
+    """
+    from_currency = from_currency.upper().strip()
+    to_currency   = to_currency.upper().strip()
+
+    try:
+        url = f"https://api.frankfurter.app/latest?from={from_currency}&to={to_currency}&amount={amount}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if "rates" in data and to_currency in data["rates"]:
+            converted = data["rates"][to_currency]
+            unit_rate = converted / amount if amount else converted
+            return (
+                f"Conversão: {amount:.2f} {from_currency} = {converted:.4f} {to_currency}\n"
+                f"Taxa: 1 {from_currency} = {unit_rate:.4f} {to_currency}\n"
+                f"Data: {data.get('date', 'N/A')}"
+            )
+        else:
+            return f"Não foi possível converter {from_currency} para {to_currency}. Verifique os códigos das moedas."
+
+    except requests.exceptions.RequestException as e:
+        logger.error("convert_currency | %s→%s | %s", from_currency, to_currency, e, exc_info=True)
+        return f"Erro ao converter {from_currency} para {to_currency} na API de câmbio: {str(e)}"
 
 
 # ============================================================

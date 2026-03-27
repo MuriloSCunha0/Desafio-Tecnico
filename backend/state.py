@@ -9,6 +9,7 @@ Contém:
 """
 
 import json
+import os
 from typing import Annotated, TypedDict
 
 from langgraph.graph import StateGraph, END
@@ -198,34 +199,84 @@ def route_after_response(state: AgentState) -> str:
 # Construção do Grafo
 # ============================================================
 
-def build_graph(db_path: str = "banco_agil.db"):
+def build_graph(db_path: str = None, use_memory: bool = False):
     """
     Constrói e retorna o grafo compilado do sistema multi-agente
-    com persistência via SqliteSaver.
+    com persistência via SqliteSaver ou MemorySaver.
 
     Args:
         db_path: Caminho para o banco SQLite de persistência.
+                 Se None, usa diretório temporário do sistema (evita OneDrive).
+        use_memory: Se True, usa MemorySaver (sem disco, ideal para testes).
 
     Returns:
-        Tuple (compiled_graph, sqlite_connection) — manter a conexão aberta
+        Tuple (compiled_graph, connection_or_none) — manter a conexão aberta
         enquanto o grafo estiver em uso.
     """
     import sqlite3
 
     from agents import triage_agent, credit_agent, interview_agent, forex_agent
+    from agents.core import _get_last_human_content, _detect_routing_target
+
+    # ── Roteador de entrada inteligente (sem custo LLM) ─────────
+    def smart_entry(state: AgentState) -> dict:
+        """Roteador zero-cost: se o usuário já está em um agente
+        especialista, pula o triage e vai direto — economiza 1 LLM call."""
+        return {}  # Não altera estado, só decide rota
+
+    def route_entry(state: AgentState) -> str:
+        """Decide para qual agente enviar: triage ou direto ao especialista."""
+        current = state.get("current_agent", "triage")
+        is_auth = state.get("is_authenticated", False)
+        messages = state.get("messages", [])
+
+        # Não autenticado → triage sempre
+        if not is_auth:
+            return "triage"
+
+        # Se já está em um agente especialista, verifica se o usuário quer trocar
+        if current in ("credit", "interview", "forex"):
+            user_msg = _get_last_human_content(messages)
+            new_target = _detect_routing_target(user_msg, messages)
+
+            # Encerrar → triage para processar
+            encerrar_words = ["encerrar", "encerra", "tchau", "sair", "finalizar"]
+            if any(w in user_msg.lower() for w in encerrar_words):
+                return "triage"
+
+            # Usuário quer trocar de agente
+            if new_target and new_target != current:
+                return new_target
+
+            # Continua no agente atual (sem triage!)
+            return current
+
+        # Triage ou estado desconhecido
+        return "triage"
 
     # Construir o grafo
     graph = StateGraph(AgentState)
 
     # Adicionar nós dos agentes
+    graph.add_node("smart_entry", smart_entry)
     graph.add_node("triage", triage_agent)
     graph.add_node("credit", credit_agent)
     graph.add_node("interview", interview_agent)
     graph.add_node("forex", forex_agent)
     graph.add_node("tools", tool_executor)
 
-    # Ponto de entrada
-    graph.set_entry_point("triage")
+    # Ponto de entrada: smart_entry (zero-cost router)
+    graph.set_entry_point("smart_entry")
+    graph.add_conditional_edges(
+        "smart_entry",
+        route_entry,
+        {
+            "triage": "triage",
+            "credit": "credit",
+            "interview": "interview",
+            "forex": "forex",
+        },
+    )
 
     # Arestas condicionais — cada agente decide: chamar tool ou responder?
     for agent_name in ["triage", "credit", "interview", "forex"]:
@@ -265,10 +316,24 @@ def build_graph(db_path: str = "banco_agil.db"):
         },
     )
 
-    # Checkpointer SQLite
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    checkpointer = SqliteSaver(conn)
+    # Checkpointer
+    conn = None
+    if use_memory:
+        from langgraph.checkpoint.memory import MemorySaver
+        checkpointer = MemorySaver()
+    else:
+        # SQLite — usa diretório temp para evitar locks do OneDrive
+        if db_path is None:
+            import tempfile
+            db_path = os.path.join(tempfile.gettempdir(), "banco_agil.db")
+
+        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA wal_autocheckpoint=100")
+        checkpointer = SqliteSaver(conn)
 
     compiled = graph.compile(checkpointer=checkpointer)
 
     return compiled, conn
+

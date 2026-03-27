@@ -1,7 +1,7 @@
 from langchain_core.messages import SystemMessage, AIMessage
 from tools import authenticate_user, end_conversation
 from agents.core import (
-    get_llm, _get_last_human_content, _detect_routing_target,
+    get_llm, get_llm_fast, _get_last_human_content, _detect_routing_target,
     _last_msg_is_tool, _last_msg_is_human, _extract_dob_from_last_human,
     _extract_cpf, _make_tool_call_message, _invoke_with_retry, _trim_messages
 )

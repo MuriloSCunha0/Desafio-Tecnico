@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Instalar dependências do sistema
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc && \
+    apt-get install -y --no-install-recommends gcc build-essential tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 # Instalar dependências Python
@@ -22,19 +22,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código da aplicação
 COPY . .
 
-# Criar diretório de dados se não existir
-RUN mkdir -p /app/data
+# Criar diretórios de dados do backend
+RUN mkdir -p /app/backend/data /app/backend/db
 
-# Expor porta do Streamlit
-EXPOSE 8501
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8501/_stcore/health')" || exit 1
-
-# Executar Streamlit
-CMD ["streamlit", "run", "app.py", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--browser.gatherUsageStats=false"]

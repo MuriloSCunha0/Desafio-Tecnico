@@ -7,9 +7,9 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 load_dotenv()
 
-def _invoke_with_retry(llm, msgs, max_retries: int = 4):
+def _invoke_with_retry(llm, msgs, max_retries: int = 3):
     """Invoca o LLM com retry automático para Rate Limit (429) do Groq/Google."""
-    delay = 5
+    delay = 3
     for attempt in range(max_retries):
         try:
             return llm.invoke(msgs)
@@ -17,7 +17,8 @@ def _invoke_with_retry(llm, msgs, max_retries: int = 4):
             err = str(e)
             is_rate_limit = "429" in err or "rate_limit" in err.lower() or "Rate limit" in err
             if is_rate_limit and attempt < max_retries - 1:
-                wait = delay * (2 ** attempt)  # 5s, 10s, 20s, 40s
+                wait = delay * (2 ** attempt)  # 3s, 6s
+                print(f"[RETRY] Rate limit hit, aguardando {wait}s (tentativa {attempt+1}/{max_retries})")
                 time.sleep(wait)
                 continue
             raise
@@ -46,6 +47,20 @@ def get_llm():
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             temperature=0.3,
         )
+
+def get_llm_fast():
+    """Retorna um LLM mais leve e rápido, ideal para triage/roteamento.
+    Usa llama-3.1-8b-instant no Groq (~5x mais rápido que 70B)."""
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower().strip()
+    if provider == "groq":
+        from langchain_groq import ChatGroq
+        return ChatGroq(
+            model="llama-3.1-8b-instant",
+            api_key=os.getenv("GROQ_API_KEY"),
+            temperature=0.3,
+        )
+    # Para outros providers, usa o modelo padrão
+    return get_llm()
 
 def _normalize_content(content) -> str:
     if isinstance(content, list):
@@ -140,15 +155,51 @@ def _make_tool_call_message(tool_name: str, args: dict) -> AIMessage:
         }],
     )
 
-def _trim_messages(messages: list, max_messages: int = 4) -> list:
+def _trim_messages(messages: list, max_messages: int = 12) -> list:
     """Retorna apenas as últimas N mensagens para enviar ao LLM.
-    Sempre preserva ToolMessages para não quebrar o protocolo tool_call→tool_result."""
+    Sempre preserva pares tool_call→tool_result para não quebrar o protocolo."""
     if len(messages) <= max_messages:
         return messages
-    return messages[-max_messages:]
+    trimmed = messages[-max_messages:]
+    # Se o primeiro item é ToolMessage (resultado orfão), busca o AIMessage tool_call anterior
+    while trimmed and isinstance(trimmed[0], ToolMessage):
+        idx = messages.index(trimmed[0])
+        if idx > 0:
+            trimmed.insert(0, messages[idx - 1])
+        else:
+            break
+    return trimmed
 
 def _has_tool_result(messages: list, substring: str) -> bool:
     return any(
         isinstance(m, ToolMessage) and substring in str(m.content)
         for m in messages
     )
+
+def _strip_llm_artifacts(content) -> str:
+    """Remove artefatos que o Groq às vezes vaza no texto da resposta:
+    - <function=tool_name>{...}</function>
+    - JSON solto com campos internos de tool call (cpf, currency, from_currency, etc.)
+    """
+    if not isinstance(content, str):
+        return content or ""
+    # Remove <function=...>{...}</function> (pode ter JSON aninhado)
+    cleaned = re.sub(r'<function=[^>]+>[\s\S]*?</function>', "", content)
+    # Campos que indicam um JSON de tool call vazado
+    _TOOL_FIELDS = (
+        r'"(?:cpf|currency|from_currency|to_currency|amount'
+        r'|tool_name|tool|function|name|parameters|arguments)"'
+    )
+    # Remove JSON simples (sem aninhamento) com campos de tool call
+    cleaned = re.sub(
+        r'\s*\{[^{}]*' + _TOOL_FIELDS + r'[^{}]*\}',
+        "",
+        cleaned,
+    )
+    # Remove JSON com um nível de aninhamento
+    cleaned = re.sub(
+        r'\s*\{(?:[^{}]|\{[^{}]*\})*' + _TOOL_FIELDS + r'(?:[^{}]|\{[^{}]*\})*\}',
+        "",
+        cleaned,
+    )
+    return cleaned.strip()

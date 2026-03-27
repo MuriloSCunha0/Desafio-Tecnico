@@ -4,6 +4,8 @@ from pydantic import BaseModel
 import uuid
 import sys
 import os
+import asyncio
+import logging
 
 # Adiciona o diretório atual ao path para importação dos agentes
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -11,6 +13,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from state import build_graph
 from langchain_core.messages import HumanMessage, AIMessage
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Definição dos modelos de entrada e saída
 class ChatRequest(BaseModel):
@@ -38,7 +42,11 @@ app.add_middleware(
 )
 
 # Instância Global do Grafo e conexão do banco de dados SQLite
-graph_instance, db_conn = build_graph(db_path="banco_agil.db")
+# DB agora fica em %TEMP% para evitar locks do OneDrive
+graph_instance, db_conn = build_graph()
+
+# Timeout máximo para invoke do LangGraph (segundos)
+INVOKE_TIMEOUT = 60
 
 def sanitize_internal_tags(content: str) -> str:
     """Limpa marcações internas de roteamento do LLM (Ex: ROTA:CREDITO)."""
@@ -78,7 +86,13 @@ async def chat_endpoint(req: ChatRequest):
     try:
         # Envia apena a mensagem nova; o LangGraph gerencia o append no array `messages` via Reducer.
         input_data = {"messages": [HumanMessage(content=req.message)]}
-        result = graph_instance.invoke(input_data, config=config)
+        
+        # Invoke com timeout para evitar travamento em rate-limit ou lock de SQLite
+        loop = asyncio.get_event_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: graph_instance.invoke(input_data, config=config)),
+            timeout=INVOKE_TIMEOUT,
+        )
         
         is_now_authenticated = result.get("is_authenticated", False)
         new_cpf = result.get("current_user_cpf", "")
@@ -125,8 +139,7 @@ async def chat_endpoint(req: ChatRequest):
                     }, as_node="triage")
                     active_thread_id = new_cpf
             except Exception as e:
-                import logging
-                logging.error(f"Erro no Thread Hopping: {e}")
+                logger.error(f"Erro no Thread Hopping: {e}")
                 # Fallback: Apenas confia na resposta gerada (Welcome padrão)
                 pass
                 
@@ -145,7 +158,40 @@ async def chat_endpoint(req: ChatRequest):
             cpf=new_cpf,
             name=name
         )
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout de {INVOKE_TIMEOUT}s atingido no invoke do LangGraph")
+        raise HTTPException(status_code=504, detail=f"O sistema demorou mais de {INVOKE_TIMEOUT}s para responder. Tente novamente.")
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal LangGraph Error: {str(e)}")
+
+
+@app.post("/api/reset")
+async def reset_endpoint():
+    """
+    Limpa o banco de dados de checkpoints e reconstrói o grafo.
+    Útil para testes limpos sem reiniciar o servidor.
+    """
+    global graph_instance, db_conn
+    try:
+        # Fecha a conexão atual
+        if db_conn:
+            db_conn.close()
+
+        # Remove os arquivos do banco
+        import tempfile
+        db_path = os.path.join(tempfile.gettempdir(), "banco_agil.db")
+        for suffix in ["", "-shm", "-wal"]:
+            try:
+                os.remove(db_path + suffix)
+            except FileNotFoundError:
+                pass
+
+        # Reconstrói o grafo com banco limpo
+        graph_instance, db_conn = build_graph()
+        logger.info("Banco de dados resetado com sucesso")
+        return {"status": "ok", "message": "Banco de dados limpo e grafo reconstruído."}
+    except Exception as e:
+        logger.error(f"Erro ao resetar banco: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao resetar: {str(e)}")

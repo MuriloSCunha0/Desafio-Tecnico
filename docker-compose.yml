@@ -2,17 +2,19 @@
 # docker-compose.yml — Banco Ágil Multi-Agent Banking System
 # ============================================================
 
+version: '3.8'
+
 services:
-  banco-agil:
+  backend:
     build: .
-    container_name: banco-agil
+    container_name: banco-agil-backend
+    working_dir: /app/backend
+    command: uvicorn main:app --host 0.0.0.0 --port 8001
     ports:
-      - "8501:8501"
+      - "8001:8001"
     volumes:
-      # Persistir dados CSV entre reinícios
-      - ./data:/app/data
-      # Persistir banco SQLite do checkpointer
-      - sqlite_data:/app/db
+      - ./backend/data:/app/backend/data
+      - sqlite_data:/app/backend/db
     environment:
       - LLM_PROVIDER=${LLM_PROVIDER:-groq}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
@@ -22,10 +24,23 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
     env_file:
-      - .env
+      - backend/.env
     restart: unless-stopped
     networks:
       - banco-agil-net
+
+  frontend:
+    build: .
+    container_name: banco-agil-frontend
+    working_dir: /app/frontend
+    command: python manage.py runserver 0.0.0.0:8000
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - banco-agil-net
+    depends_on:
+      - backend
 
 networks:
   banco-agil-net:
